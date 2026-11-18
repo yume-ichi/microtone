@@ -34,7 +34,7 @@ small{color:var(--mu)}
 <input type="text" id="inp" value="Cm" autocomplete="off" spellcheck="false">
 <div id="err"></div>
 <div class="chips" id="chips"></div>
-<p><small>書式：<b>Cm</b> / <b>G7</b> / <b>A4</b>（音名）/ <b>7\41</b>（基準音から41等分平均律の7ステップ）/ <b>440Hz</b></small></p>
+<p><small>書式：<b>Cm</b> / <b>G7</b> / <b>C4</b>（単独音）/ <b>C4,2/3</b>（C4と2/3倍を同時に）/ <b>C4X,3/2</b>（Xを付けるとC4は鳴らさない）/ <b>7\41</b>（基準音から41等分平均律の7ステップ）/ <b>440Hz</b><br>41等分用（xen.wiki 41edo準拠）: <b>Cv</b>（0-13-24）<b>C^</b> <b>C^m</b> <b>Cvm</b> <b>C~</b>、音名は <b>^E4</b> <b>vE4</b>（上下1ステップ）</small></p>
 <div class="row" style="margin-top:8px">
 <button class="p" id="play">▶ 再生</button>
 <button id="stop">■ 停止</button>
@@ -73,20 +73,37 @@ const a4=()=>parseFloat($("a4").value)||440;
 function midiOf(l,acc,oct){let s=SEMI[l.toUpperCase()];if(/[#♯]/.test(acc))s++;if(/[b♭]/.test(acc))s--;return(oct+1)*12+s}
 const fOfMidi=m=>a4()*Math.pow(2,(m-69)/12);
 function parseNote(s){const m=s.match(/^([A-Ga-g])([#♯b♭]?)(-?\d)?$/);if(!m)throw 0;return fOfMidi(midiOf(m[1],m[2],m[3]!==undefined?+m[3]:+$("oct").value))}
+const T41=[0,3,7,10,14,17,20,24,27,31,34,38],SP={"aug":[0,14,28],"+":[0,14,28],"dim7":[0,10,20,30]};
+const UD={"v":[0,13,24],"^":[0,15,24],"vm":[0,9,24],"^m":[0,11,24],"~":[0,12,24]};
+function steps41(q){return SP[q]||Q[q].map(i=>T41[i%12]+41*Math.floor(i/12))}
+function snap41(f){const a=a4();return a*Math.pow(2,Math.round(41*Math.log2(f/a))/41)}
+function snap(f){if($("tuning").value!=="edo")return f;const N=+$("edoN").value||12,a=a4();return a*Math.pow(2,Math.round(N*Math.log2(f/a))/N)}
 function parseToken(raw){
   let t=raw.replace(/[¥＼]/g,"\\").replace(/[＋]/g,"+").replace(/[−－]/g,"-");
   const off=0;
+  if(t.includes(",")){const p=t.split(","),mute=/[Xx]$/.test(p[0]);if(mute)p[0]=p[0].slice(0,-1);
+    const h=p[0].match(/^(\d+(?:\.\d+)?)hz$/i);
+    const b0=h?parseFloat(h[1]):parseNote(p[0]),bf=h?b0:snap(b0);
+    const fs=p.slice(1).map(r=>{const q=r.match(/^(\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/);if(!q)throw new Error("比が解釈できません: "+r);const rt=(+q[1])/(q[2]?+q[2]:1);if($("tuning").value==="edo"&&rt>0){const N=+$("edoN").value||12;return[bf*Math.pow(2,Math.round(N*Math.log2(rt))/N),b0*rt]}return[bf*rt,b0*rt]});
+    const all=mute?fs:[[bf,b0],...fs],keep=all.filter((x,i)=>all.findIndex(g=>Math.abs(g[0]/x[0]-1)<1e-9)===i);return{label:raw,fs:keep.map(x=>x[0]),ideal:keep.map(x=>x[1]),off}}
   let hz=t.match(/^(\d+(?:\.\d+)?)hz$/i);
   if(hz)return{label:raw,fs:[parseFloat(hz[1])],off};
   let e=t.match(/^(-?\d+)\\(\d+)$/);
-  if(e){const bf=parseNote($("base").value.trim());return{label:raw,fs:[bf*Math.pow(2,(+e[1])/(+e[2]))],off}}
+  if(e){const b0=parseNote($("base").value.trim()),bf=snap(b0),r=Math.pow(2,(+e[1])/(+e[2]));return{label:raw,fs:[bf*r],ideal:[b0*r],off}}
+  const um=t.match(/^([\^v]+)([A-Ga-g][#♯b♭]?-?\d)$/);
+  if(um){const k=[...um[1]].reduce((a,c)=>a+(c==="^"?1:-1),0),mm=um[2].match(/^([A-Ga-g])([#♯b♭]?)(-?\d)$/);
+    const f=snap41(fOfMidi(midiOf(mm[1],mm[2],+mm[3])))*Math.pow(2,k/41);return{label:raw,fs:[f],off}}
   const m=t.match(/^([A-Ga-g])([#♯b♭]?)(-?\d)?(.*)$/);
   if(!m)throw new Error("解釈できません: "+raw);
-  const q=m[4];if(!(q in Q))throw new Error("未対応のコード種別: "+raw);
+  const q=m[4],U=UD[q];if(!U&&!(q in Q))throw new Error("未対応のコード種別: "+raw);
+  if(m[3]!==undefined&&q===""){const id=fOfMidi(midiOf(m[1],m[2],+m[3]));return{label:raw,fs:[snap(id)],ideal:[id],off}}
   const root=midiOf(m[1],m[2],m[3]!==undefined?+m[3]:+$("oct").value);
-  const rf=fOfMidi(root),N=+$("edoN").value||12,edo=$("tuning").value==="edo";
-  const fs=Q[q].map(i=>edo?rf*Math.pow(2,Math.round(i*N/12)/N):fOfMidi(root+i));
-  return{label:raw,fs,off};
+  const rf=snap(fOfMidi(root)),N=+$("edoN").value||12,edo=$("tuning").value==="edo";
+  const e41=edo&&N===41;
+  if(U&&!e41)throw new Error("この記法は41等分平均律用です（コードの音律で「41等分」を選び、N=41にしてください）: "+raw);
+  const steps=U||(e41?steps41(q):null);
+  const fs=steps?steps.map(s=>rf*Math.pow(2,s/41)):Q[q].map(i=>edo?rf*Math.pow(2,Math.round(i*N/12)/N):fOfMidi(root+i));
+  return{label:raw,fs,off,ideal:(edo&&Q[q])?Q[q].map(i=>fOfMidi(root+i)):null,info:edo?(steps||Q[q].map(i=>Math.round(i*N/12))).join("-"):""};
 }
 function stopAll(){clearTimeout(timer);const t=ctx?ctx.currentTime:0;live.forEach(o=>{try{o.g.gain.cancelScheduledValues(t);o.g.gain.setTargetAtTime(0,t,.03);o.o.stop(t+.2)}catch(e){}});live=[]}
 function play(){
@@ -100,7 +117,7 @@ function play(){
   const g0=0,all=[];
   const lines=[];
   items.forEach(it=>{const fs=it.fs.map(f=>f*Math.pow(2,(it.off+g0)/1200));all.push(...fs);
-    lines.push(it.label+"  →  "+fs.map(f=>f.toFixed(2)+" Hz").join(", "))});
+    const ed=$("tuning").value==="edo";lines.push(it.label+(it.info?" ["+it.info+"]":"")+"  →  "+fs.map((f,j)=>f.toFixed(2)+" Hz"+(ed&&it.ideal?" ("+(c=>(c>=0?"+":"")+c.toFixed(1))(1200*Math.log2(f/it.ideal[j]))+"¢)":"")).join(", "))});
   $("out").textContent=lines.join("\n");
   const vol=0.3/Math.max(1,all.length)*Math.min(all.length,3),now=ctx.currentTime,d=+$("dur").value;
   all.forEach(f=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=$("wave").value;o.frequency.value=f;
@@ -168,7 +185,7 @@ async function doExport(fmt){
 document.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>doExport(b.dataset.f));
 $("play").onclick=play;$("stop").onclick=stopAll;
 $("inp").addEventListener("keydown",e=>{if(e.key==="Enter")play()});
-["Cm","C","G7","Cmaj7","A4","440Hz","1\\41","7\\41","24\\41","Cm 7\\41"].forEach(x=>{
+["Cm","C","G7","Cmaj7","Cv","C~","^E4","C4","C4,2/3","C4,5/4,3/2","C4X,3/2","440Hz","1\\41","7\\41","24\\41","Cm 7\\41"].forEach(x=>{
   const b=document.createElement("button");b.textContent=x;b.onclick=()=>{$("inp").value=x;play()};$("chips").appendChild(b)});
 </script>
 </body>
