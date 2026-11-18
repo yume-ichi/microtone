@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>微分音・コード サウンド出力</title>
+<style>
+:root{--bg:#fafafa;--fg:#1c1c1e;--card:#fff;--bd:#d8d8dc;--ac:#3b6ef5;--mu:#6b6b75;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181b;--fg:#ececf0;--card:#222327;--bd:#3a3b42;--ac:#7c9cff;--mu:#9a9aa6;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#17181b;--fg:#ececf0;--card:#222327;--bd:#3a3b42;--ac:#7c9cff;--mu:#9a9aa6;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;line-height:1.6}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:8px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mu);margin:8px 0 4px}
+input[type=text],input[type=number],select{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font-size:16px}
+input[type=range]{width:100%}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>div{flex:1;min-width:130px}
+button{font-size:15px;padding:10px 16px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--fg);cursor:pointer}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chips button{padding:5px 10px;font-size:13px;font-family:ui-monospace,monospace}
+#out{font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap;color:var(--mu)}
+#err{color:#d33;font-size:13px;min-height:1em}
+small{color:var(--mu)}
+</style>
+</head>
+<body>
+<main>
+<h1>微分音・コード サウンド出力</h1>
+<div class="card">
+<label for="inp">入力（スペース区切りで同時に鳴らします）</label>
+<input type="text" id="inp" value="Cm" autocomplete="off" spellcheck="false">
+<div id="err"></div>
+<div class="chips" id="chips"></div>
+<p><small>書式：<b>Cm</b> / <b>G7</b> / <b>A4</b>（音名）/ <b>7\41</b>（基準音から41等分平均律の7ステップ）/ <b>440Hz</b></small></p>
+<div class="row" style="margin-top:8px">
+<button class="p" id="play">▶ 再生</button>
+<button id="stop">■ 停止</button>
+</div>
+</div>
+
+<div class="card">
+<div class="row">
+<div><label>A4の周波数 (Hz)</label><input type="number" id="a4" value="440" step="0.1"></div>
+<div><label>基準音（n\N用）</label><input type="text" id="base" value="C4"></div>
+<div><label>コード・音名のオクターブ</label><input type="number" id="oct" value="4" min="0" max="8"></div>
+</div>
+<div class="row">
+<div><label>波形</label><select id="wave"><option>sine</option><option>triangle</option><option>square</option><option>sawtooth</option></select></div>
+<div><label>長さ（秒・0で停止まで保持）</label><input type="number" id="dur" value="2" min="0" step="0.5"></div>
+<div><label>コードの音律</label><select id="tuning"><option value="12">12平均律</option><option value="edo">N等分平均律に量子化</option></select></div>
+<div><label>N（上で選択時）</label><input type="number" id="edoN" value="41" min="1" max="200"></div>
+</div>
+</div>
+
+<div class="card"><label>音声ファイルに書き出し</label>
+<div class="row"><div><label>長さ（秒）</label><input type="number" id="xdur" value="3" min="0.2" step="0.5"></div></div>
+<div class="row" style="margin-top:10px"><button class="p" data-f="wav">WAV</button><button class="p" data-f="mp3">MP3</button><button class="p" data-f="m4a">M4A</button></div>
+<div id="xst" style="font-size:13px;color:var(--mu);margin-top:8px"></div></div>
+
+<div class="card"><div id="out">ここに鳴らした周波数が表示されます</div></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const SEMI={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+const Q={"":[0,4,7],"m":[0,3,7],"7":[0,4,7,10],"maj7":[0,4,7,11],"M7":[0,4,7,11],"m7":[0,3,7,10],"mM7":[0,3,7,11],"dim":[0,3,6],"dim7":[0,3,6,9],"m7b5":[0,3,6,10],"aug":[0,4,8],"+":[0,4,8],"sus4":[0,5,7],"sus2":[0,2,7],"6":[0,4,7,9],"m6":[0,3,7,9],"9":[0,4,7,10,14],"m9":[0,3,7,10,14],"maj9":[0,4,7,11,14],"add9":[0,4,7,14],"5":[0,7]};
+let ctx,live=[],timer;
+const a4=()=>parseFloat($("a4").value)||440;
+function midiOf(l,acc,oct){let s=SEMI[l.toUpperCase()];if(/[#♯]/.test(acc))s++;if(/[b♭]/.test(acc))s--;return(oct+1)*12+s}
+const fOfMidi=m=>a4()*Math.pow(2,(m-69)/12);
+function parseNote(s){const m=s.match(/^([A-Ga-g])([#♯b♭]?)(-?\d)?$/);if(!m)throw 0;return fOfMidi(midiOf(m[1],m[2],m[3]!==undefined?+m[3]:+$("oct").value))}
+function parseToken(raw){
+  let t=raw.replace(/[¥＼]/g,"\\").replace(/[＋]/g,"+").replace(/[−－]/g,"-");
+  const off=0;
+  let hz=t.match(/^(\d+(?:\.\d+)?)hz$/i);
+  if(hz)return{label:raw,fs:[parseFloat(hz[1])],off};
+  let e=t.match(/^(-?\d+)\\(\d+)$/);
+  if(e){const bf=parseNote($("base").value.trim());return{label:raw,fs:[bf*Math.pow(2,(+e[1])/(+e[2]))],off}}
+  const m=t.match(/^([A-Ga-g])([#♯b♭]?)(-?\d)?(.*)$/);
+  if(!m)throw new Error("解釈できません: "+raw);
+  const q=m[4];if(!(q in Q))throw new Error("未対応のコード種別: "+raw);
+  const root=midiOf(m[1],m[2],m[3]!==undefined?+m[3]:+$("oct").value);
+  const rf=fOfMidi(root),N=+$("edoN").value||12,edo=$("tuning").value==="edo";
+  const fs=Q[q].map(i=>edo?rf*Math.pow(2,Math.round(i*N/12)/N):fOfMidi(root+i));
+  return{label:raw,fs,off};
+}
+function stopAll(){clearTimeout(timer);const t=ctx?ctx.currentTime:0;live.forEach(o=>{try{o.g.gain.cancelScheduledValues(t);o.g.gain.setTargetAtTime(0,t,.03);o.o.stop(t+.2)}catch(e){}});live=[]}
+function play(){
+  $("err").textContent="";
+  let items=[];
+  try{items=$("inp").value.trim().split(/\s+/).filter(Boolean).map(parseToken)}catch(e){$("err").textContent=e.message||"入力を解釈できません";return}
+  if(!items.length)return;
+  ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();
+  if(ctx.state==="suspended")ctx.resume();
+  stopAll();
+  const g0=0,all=[];
+  const lines=[];
+  items.forEach(it=>{const fs=it.fs.map(f=>f*Math.pow(2,(it.off+g0)/1200));all.push(...fs);
+    lines.push(it.label+"  →  "+fs.map(f=>f.toFixed(2)+" Hz").join(", "))});
+  $("out").textContent=lines.join("\n");
+  const vol=0.3/Math.max(1,all.length)*Math.min(all.length,3),now=ctx.currentTime,d=+$("dur").value;
+  all.forEach(f=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type=$("wave").value;o.frequency.value=f;
+    g.gain.setValueAtTime(0,now);g.gain.linearRampToValueAtTime(vol/Math.max(1,all.length/3),now+.02);
+    o.connect(g).connect(ctx.destination);o.start(now);live.push({o,g})});
+  if(d>0)timer=setTimeout(stopAll,d*1000);
+}
+const SR=48000;
+function concat(a){let n=0;a.forEach(x=>n+=x.length);const r=new Uint8Array(n);let o=0;a.forEach(x=>{r.set(x,o);o+=x.length});return r}
+async function renderPCM(){
+  const items=$("inp").value.trim().split(/\s+/).filter(Boolean).map(parseToken);
+  const fs=items.flatMap(i=>i.fs);if(!fs.length)throw new Error("入力が空です");
+  const sec=Math.max(.2,+$("xdur").value||3);
+  const oc=new OfflineAudioContext(1,Math.ceil(SR*sec),SR);
+  const amp=0.3/Math.sqrt(fs.length);
+  fs.forEach(f=>{const o=oc.createOscillator(),g=oc.createGain();o.type=$("wave").value;o.frequency.value=f;
+    g.gain.setValueAtTime(0,0);g.gain.linearRampToValueAtTime(amp,.02);g.gain.setValueAtTime(amp,sec-.05);g.gain.linearRampToValueAtTime(0,sec);
+    o.connect(g).connect(oc.destination);o.start(0);o.stop(sec)});
+  return (await oc.startRendering()).getChannelData(0);
+}
+function toI16(p){const r=new Int16Array(p.length);for(let i=0;i<p.length;i++)r[i]=Math.max(-1,Math.min(1,p[i]))*32767;return r}
+function wavBytes(pcm){const n=pcm.length,b=new ArrayBuffer(44+n*2),v=new DataView(b),i16=toI16(pcm);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  w(0,"RIFF");v.setUint32(4,36+n*2,true);w(8,"WAVEfmt ");v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,"data");v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++)v.setInt16(44+i*2,i16[i],true);
+  return new Uint8Array(b)}
+function mp3Bytes(pcm){if(!window.lamejs)throw new Error("MP3エンコーダを読み込めませんでした");
+  const enc=new lamejs.Mp3Encoder(1,SR,128),i16=toI16(pcm),out=[];
+  for(let i=0;i<i16.length;i+=1152){const c=enc.encodeBuffer(i16.subarray(i,i+1152));if(c.length)out.push(new Uint8Array(c))}
+  const e=enc.flush();if(e.length)out.push(new Uint8Array(e));
+  return concat(out)}
+async function m4aBytes(pcm){
+  const NG="このブラウザはM4A(AAC)の書き出しに対応していません。WAVかMP3を使ってください";
+  if(!window.AudioEncoder||!window.Mp4Muxer)throw new Error(NG);
+  const cfg={codec:"mp4a.40.2",sampleRate:SR,numberOfChannels:1,bitrate:128000};
+  const sup=await AudioEncoder.isConfigSupported(cfg);if(!sup.supported)throw new Error(NG);
+  const target=new Mp4Muxer.ArrayBufferTarget(),muxer=new Mp4Muxer.Muxer({target,audio:{codec:"aac",numberOfChannels:1,sampleRate:SR},fastStart:"in-memory"});
+  let err=null;
+  const enc=new AudioEncoder({output:(c,m)=>muxer.addAudioChunk(c,m),error:e=>{err=e}});
+  enc.configure(cfg);
+  const B=4800;
+  for(let i=0;i<pcm.length;i+=B){const part=pcm.slice(i,i+B);
+    enc.encode(new AudioData({format:"f32",sampleRate:SR,numberOfFrames:part.length,numberOfChannels:1,timestamp:Math.round(i/SR*1e6),data:part}))}
+  await enc.flush();if(err)throw err;muxer.finalize();return new Uint8Array(target.buffer)}
+const CT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CT[(c^u[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function zipBytes(name,data){const nb=new TextEncoder().encode(name),crc=crc32(data),n=data.length;
+  const lh=new DataView(new ArrayBuffer(30));lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint32(14,crc,true);lh.setUint32(18,n,true);lh.setUint32(22,n,true);lh.setUint16(26,nb.length,true);
+  const ch=new DataView(new ArrayBuffer(46));ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint32(16,crc,true);ch.setUint32(20,n,true);ch.setUint32(24,n,true);ch.setUint16(28,nb.length,true);
+  const ee=new DataView(new ArrayBuffer(22));ee.setUint32(0,0x06054b50,true);ee.setUint16(8,1,true);ee.setUint16(10,1,true);ee.setUint32(12,46+nb.length,true);ee.setUint32(16,30+nb.length+n,true);
+  return concat([new Uint8Array(lh.buffer),nb,data,new Uint8Array(ch.buffer),nb,new Uint8Array(ee.buffer)])}
+async function saveFile(name,bytes,mime){
+  let dl=null;try{if(window.claude&&claude.use)dl=await claude.use("downloads")}catch(e){}
+  if(dl){await dl.save({filename:name.replace(/\.[^.]+$/,"")+".zip",data:new Blob([zipBytes(name,bytes)])});return "zip"}
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([bytes],{type:mime}));a.download=name;document.body.appendChild(a);a.click();a.remove();return "direct"}
+async function doExport(fmt){
+  const st=$("xst");st.textContent="書き出し中…";
+  try{const pcm=await renderPCM();let bytes,mime;
+    if(fmt==="wav"){bytes=wavBytes(pcm);mime="audio/wav"}else if(fmt==="mp3"){bytes=mp3Bytes(pcm);mime="audio/mpeg"}else{bytes=await m4aBytes(pcm);mime="audio/mp4"}
+    const base=$("inp").value.trim().replace(/[^A-Za-z0-9#-]+/g,"_").slice(0,40)||"sound";
+    const how=await saveFile(base+"."+fmt,bytes,mime);
+    st.textContent=how==="zip"?"ZIPに入れて保存しました（このページでは音声ファイルを直接保存できないため）。解凍すると ."+fmt+" が入っています":"保存しました";
+  }catch(e){st.textContent=(e&&e.code==="declined")?"キャンセルしました":"失敗: "+((e&&e.message)||e)}
+}
+document.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>doExport(b.dataset.f));
+$("play").onclick=play;$("stop").onclick=stopAll;
+$("inp").addEventListener("keydown",e=>{if(e.key==="Enter")play()});
+["Cm","C","G7","Cmaj7","A4","440Hz","1\\41","7\\41","24\\41","Cm 7\\41"].forEach(x=>{
+  const b=document.createElement("button");b.textContent=x;b.onclick=()=>{$("inp").value=x;play()};$("chips").appendChild(b)});
+</script>
+</body>
+</html>
