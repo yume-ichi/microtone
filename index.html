@@ -34,7 +34,7 @@ small{color:var(--mu)}
 <input type="text" id="inp" value="Cm" autocomplete="off" spellcheck="false">
 <div id="err"></div>
 <div class="chips" id="chips"></div>
-<p><small>書式：<b>Cm</b> / <b>G7</b> / <b>C4</b>（単独音）/ <b>C4,2/3</b>（C4と2/3倍を同時に）/ <b>C4X,3/2</b>（Xを付けるとC4は鳴らさない）/ <b>7\41</b>（基準音から41等分平均律の7ステップ）/ <b>440Hz</b><br>41等分用（xen.wiki 41edo準拠）: <b>Cv</b>（0-13-24）<b>C^</b> <b>C^m</b> <b>Cvm</b> <b>C~</b>、音名は <b>^E4</b> <b>vE4</b>（上下1ステップ）</small></p>
+<p><small>書式：<b>Cm</b> / <b>G7</b> / <b>C4</b>（単独音）/ <b>C4,G4</b>（複数の音を同時に）/ <b>C4,2/3</b>（C4と2/3倍を同時に）/ <b>C4X,3/2</b>（Xを付けるとC4は鳴らさない）/ <b>7\41</b>（基準音から41等分平均律の7ステップ）/ <b>440Hz</b><br>41等分用（xen.wiki 41edo準拠）: <b>Cv</b>（0-13-24）<b>C^</b> <b>C^m</b> <b>Cvm</b> <b>C~</b>、音名は <b>^E4</b> <b>vE4</b>（上下1ステップ）</small></p>
 <div class="row" style="margin-top:8px">
 <button class="p" id="play">▶ 再生</button>
 <button id="stop">■ 停止</button>
@@ -83,7 +83,7 @@ function parseToken(raw){
   if(t.includes(",")){const p=t.split(","),mute=/[Xx]$/.test(p[0]);if(mute)p[0]=p[0].slice(0,-1);
     const h=p[0].match(/^(\d+(?:\.\d+)?)hz$/i);
     const b0=h?parseFloat(h[1]):parseNote(p[0]),bf=h?b0:snap(b0);
-    const fs=p.slice(1).map(r=>{const q=r.match(/^(\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/);if(!q)throw new Error("比が解釈できません: "+r);const rt=(+q[1])/(q[2]?+q[2]:1);if($("tuning").value==="edo"&&rt>0){const N=+$("edoN").value||12;return[bf*Math.pow(2,Math.round(N*Math.log2(rt))/N),b0*rt]}return[bf*rt,b0*rt]});
+    const fs=p.slice(1).map(r=>{const nt=r.match(/^[A-Ga-g][#♯b♭]?-?\d?$/);if(nt){const x=parseNote(r);return[snap(x),x]}const hz2=r.match(/^(\d+(?:\.\d+)?)hz$/i);if(hz2){const x=parseFloat(hz2[1]);return[x,x]}const q=r.match(/^(\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/);if(!q)throw new Error("比が解釈できません: "+r);const rt=(+q[1])/(q[2]?+q[2]:1);if($("tuning").value==="edo"&&rt>0){const N=+$("edoN").value||12;return[bf*Math.pow(2,Math.round(N*Math.log2(rt))/N),b0*rt]}return[bf*rt,b0*rt]});
     const all=mute?fs:[[bf,b0],...fs],keep=all.filter((x,i)=>all.findIndex(g=>Math.abs(g[0]/x[0]-1)<1e-9)===i);return{label:raw,fs:keep.map(x=>x[0]),ideal:keep.map(x=>x[1]),off}}
   let hz=t.match(/^(\d+(?:\.\d+)?)hz$/i);
   if(hz)return{label:raw,fs:[parseFloat(hz[1])],off};
@@ -184,7 +184,7 @@ async function doExport(fmt){
 document.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>doExport(b.dataset.f));
 $("play").onclick=play;$("stop").onclick=stopAll;
 $("inp").addEventListener("keydown",e=>{if(e.key==="Enter")play()});
-["Cm","C","G7","Cmaj7","Cv","C~","^E4","C4","C4,2/3","C4,5/4,3/2","C4X,3/2","440Hz","1\\41","7\\41","24\\41","Cm 7\\41"].forEach(x=>{
+["Cm","C","G7","Cmaj7","Cv","C~","^E4","C4","C4,G4","C4,2/3","C4,5/4,3/2","C4X,3/2","440Hz","1\\41","7\\41","24\\41","Cm 7\\41"].forEach(x=>{
   const b=document.createElement("button");b.textContent=x;b.onclick=()=>{$("inp").value=x;play()};$("chips").appendChild(b)});
 </script>
 </body>
